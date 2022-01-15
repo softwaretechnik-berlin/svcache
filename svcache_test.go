@@ -68,11 +68,13 @@ func TestPointInTimeSequential(t *testing.T) {
 	assert.Nil(t, value)
 	assert.Equal(t, 0, probe.LoaderInvocations())
 
-	value = cache.Get(context.Background())
+	value, err := cache.Get(context.Background())
+	assert.NoError(t, err)
 	assert.Equal(t, 1, value)
 	assert.Equal(t, 1, probe.LoaderInvocations())
 
-	value = cache.Get(context.Background())
+	value, err = cache.Get(context.Background())
+	assert.NoError(t, err)
 	assert.Equal(t, 1, value)
 	assert.Equal(t, 1, probe.LoaderInvocations())
 
@@ -146,7 +148,9 @@ func TestRenew(t *testing.T) {
 
 	probe.clock.Advance(testRenewalbleAfter - semiTestTick)
 
-	assert.Equal(t, 1, cache.Get(context.Background()))
+	value, err := cache.Get(context.Background())
+	assert.NoError(t, err)
+	assert.Equal(t, 1, value)
 	assert.Equal(t, 1, probe.LoaderInvocations())
 
 	probe.clock.Advance(fullTestTick)
@@ -174,7 +178,9 @@ func TestRenew(t *testing.T) {
 	assert.Equal(t, 2, probe.LoaderInvocations())
 
 	probe.clock.Advance(fullTestTick)
-	assert.Equal(t, 2, cache.Get(context.Background()))
+	value, err = cache.Get(context.Background())
+	assert.NoError(t, err)
+	assert.Equal(t, 2, value)
 	waitActivelyUntil(t, func() bool { return probe.LoaderInvocations() != 2 }, time.Second)
 	time.Sleep(time.Millisecond)
 	assert.Equal(t, 3, probe.LoaderInvocations())
@@ -226,12 +232,16 @@ func TestGetContext(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	assert.Nil(t, cache.Get(ctx))
+	value, err := cache.Get(ctx)
+	assert.Equal(t, context.Canceled, err)
+	assert.Nil(t, value, "Nil expected because the context was cancelled and no value has yet been loaded")
 	time.Sleep(100 * time.Millisecond)
 	assert.Equal(t, 0, probe.LoaderInvocations())
 
 	// Get a value so that there's an old value in the cache
-	assert.Equal(t, 1, cache.Get(context.Background()))
+	value, err = cache.Get(context.Background())
+	assert.NoError(t, err)
+	assert.Equal(t, 1, value)
 	probe.clock.Advance(2 * testTTL)
 
 	// we won't let the loading complete until later
@@ -239,12 +249,18 @@ func TestGetContext(t *testing.T) {
 
 	ctx, cancel = context.WithCancel(context.Background())
 	time.AfterFunc(100*time.Millisecond, cancel)
-	assert.Equal(t, 1, cache.Get(ctx))
+	value, err = cache.Get(ctx)
+	assert.Equal(t, context.Canceled, err)
+	assert.Equal(t, 1, value)
 	assert.Equal(t, 2, probe.LoaderInvocations())
 
 	ctx, cancel = context.WithTimeout(context.Background(), 100*time.Millisecond)
-	assert.Equal(t, 1, cache.Get(ctx))
+	value, err = cache.Get(ctx)
+	assert.Equal(t, context.DeadlineExceeded, err)
+	assert.Equal(t, 1, value)
 	assert.Equal(t, 2, probe.LoaderInvocations())
+
+	probe.waitGroup.Done()
 }
 
 func newCacheForTest() (*InMemory, *testProbe) {
@@ -294,10 +310,15 @@ func assertValueWithConcurrency(t *testing.T, value interface{}, concurrency int
 }
 
 func assertValueWithConcurrencyNoAdd(t *testing.T, value interface{}, concurrency int, cache SingleValueCache, probe *testProbe) {
-	results := make(chan interface{}, concurrency)
+	type result struct {
+		value interface{}
+		err   error
+	}
+	results := make(chan result, concurrency)
 	for i := 0; i <= concurrency; i++ {
 		go func() {
-			results <- cache.Get(context.Background())
+			value, err := cache.Get(context.Background())
+			results <- result{value, err}
 		}()
 	}
 
@@ -307,7 +328,10 @@ func assertValueWithConcurrencyNoAdd(t *testing.T, value interface{}, concurrenc
 	for i := 0; i <= concurrency; i++ {
 		select {
 		case result := <-results:
-			if !assert.Equal(t, value, result, "iteration %d", i) {
+			if !assert.NoError(t, result.err, "iteration %d", i) {
+				return
+			}
+			if !assert.Equal(t, value, result.value, "iteration %d", i) {
 				return
 			}
 		case <-time.After(time.Second):

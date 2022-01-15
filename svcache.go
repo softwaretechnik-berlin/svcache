@@ -54,8 +54,8 @@ type SingleValueCache interface {
 	//
 	// If there is no value readily available, it will block until a value is available.
 	//
-	// If the context is cancelled, an expired will be returned if available, otherwise nil.
-	Get(ctx context.Context) (value interface{})
+	// If the context is cancelled, the context error will be returned and an expired value will be returned if available, otherwise nil.
+	Get(ctx context.Context) (value interface{}, err error)
 
 	// Peek returns an unexpired value if one is already loaded.
 	//
@@ -136,17 +136,19 @@ func NewInMemory(loader Loader) *InMemory {
 //
 // There will only ever be one goroutine invoking the Loader at any given time.
 // If multiple threads call Get concurrently, a single one of them will invoke the Loader, and the others will wait for it to finish.
-func (m *InMemory) Get(ctx context.Context) interface{} {
+//
+// If the context is cancelled, the context error will be returned and an expired value will be returned if available, otherwise nil.
+func (m *InMemory) Get(ctx context.Context) (value interface{}, err error) {
 	state := m.getState()
 
-	if ctx.Err() != nil {
-		return state.latestReadableEntry().Value
+	if err := ctx.Err(); err != nil {
+		return state.latestReadableEntry().Value, err
 	}
 
 	if state.isLoaded() {
 		goto LOADED
 	} else if value, unexpired := state.previousEntry.unexpiredValue(m.clock.Now()); unexpired {
-		return value
+		return value, nil
 	}
 
 	// The rest of this function is just a for loop that we can jump into the middle of to optimise the case where we already know we're loaded
@@ -154,7 +156,7 @@ func (m *InMemory) Get(ctx context.Context) interface{} {
 WAIT_UNTIL_LOADED:
 	select {
 	case <-ctx.Done():
-		return state.previousEntry.Value
+		return state.previousEntry.Value, ctx.Err()
 	case <-state.loaded:
 	}
 
@@ -164,7 +166,7 @@ LOADED:
 		if !now.Before(state.currentEntry.BecomesRenewable) {
 			m.triggerLoading(state)
 		}
-		return value
+		return value, nil
 	}
 	state = m.triggerLoading(state)
 	goto WAIT_UNTIL_LOADED // loop
