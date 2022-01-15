@@ -2,6 +2,7 @@
 package svcache
 
 import (
+	"context"
 	"sync/atomic"
 	"time"
 	"unsafe"
@@ -44,7 +45,7 @@ func (e Entry) unexpiredValue(now time.Time) (value interface{}, isUnexpired boo
 //
 // A Loader returns receives the previous cache Entry, and returns a new Entry.
 //
-// The new Entry should have an Expires time in the future, otherwise the value can't be used.
+// If the new Entry has an Expires time in the past, loading will be immediately retried.
 type Loader func(previous Entry) Entry
 
 // SingleValueCache is a cache for a single value.
@@ -52,7 +53,9 @@ type SingleValueCache interface {
 	// Get returns the current value.
 	//
 	// If there is no value readily available, it will block until a value is available.
-	Get() (value interface{})
+	//
+	// If the context is cancelled, an expired will be returned if available, otherwise nil.
+	Get(ctx context.Context) (value interface{})
 
 	// Peek returns an unexpired value if one is already loaded.
 	//
@@ -117,23 +120,38 @@ func NewInMemory(loader Loader) *InMemory {
 //
 // There will only ever be one goroutine invoking the Loader at any given time.
 // If multiple threads call Get concurrently, a single one of them will invoke the Loader, and the others will wait for it to finish.
-func (m *InMemory) Get() interface{} {
+func (m *InMemory) Get(ctx context.Context) interface{} {
 	for {
 		state, loaded := m.getState()
 		now := m.clock.Now()
+		var wait <-chan struct{}
+		var expiredValue interface{}
 		if loaded {
 			if value, unexpired := state.currentEntry.unexpiredValue(now); unexpired {
-				if !now.Before(state.currentEntry.BecomesRenewable) {
-					go m.loadIfStateIsStill(state)
+				if !now.Before(state.currentEntry.BecomesRenewable) && ctx.Err() == nil {
+					m.triggerLoading(state)
 				}
 				return value
 			}
-			m.loadIfStateIsStill(state)
+			expiredValue = state.currentEntry.Value
+			if ctx.Err() != nil {
+				return expiredValue
+			}
+			wait = m.triggerLoading(state)
+			if wait == nil {
+				continue
+			}
 		} else {
 			if value, unexpired := state.previousEntry.unexpiredValue(now); unexpired {
 				return value
 			}
-			<-state.loaded
+			wait = state.loaded
+			expiredValue = state.previousEntry.Value
+		}
+		select {
+		case <-ctx.Done():
+			return expiredValue
+		case <-wait:
 		}
 	}
 }
@@ -161,17 +179,20 @@ func (m *InMemory) getState() (state *inMemoryState, loaded bool) {
 	return
 }
 
-func (m *InMemory) loadIfStateIsStill(old *inMemoryState) {
+func (m *InMemory) triggerLoading(old *inMemoryState) <-chan struct{} {
 	loaded := make(chan struct{})
 	newState := &inMemoryState{
 		previousEntry: old.currentEntry,
 		loaded:        loaded,
 	}
 	if !m.replaceState(old, newState) {
-		return
+		return nil
 	}
-	newState.currentEntry = m.loader(newState.previousEntry)
-	close(loaded)
+	go func() {
+		newState.currentEntry = m.loader(newState.previousEntry)
+		close(loaded)
+	}()
+	return loaded
 }
 
 func (m *InMemory) replaceState(old *inMemoryState, new *inMemoryState) bool {

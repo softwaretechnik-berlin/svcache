@@ -15,7 +15,10 @@ Example
 -------
 
 ```go
-import "github.com/softwaretechnik-berlin/svcache"
+import (
+    "context"
+    "github.com/softwaretechnik-berlin/svcache"
+)
 
 demonstrateApi() {
     cache := svcache.NewInMemory(func(previous Entry) Entry {
@@ -33,7 +36,7 @@ demonstrateApi() {
     })
 
     // Block for a value
-    value := cache.Get()
+    value := cache.Get(context.Background())
     println(value)
 
     // peek at the current value if available

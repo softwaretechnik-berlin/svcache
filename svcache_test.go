@@ -1,6 +1,7 @@
 package svcache
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -29,7 +30,7 @@ func ExampleInMemory() {
 	})
 
 	// block for a value
-	println(cache.Get())
+	println(cache.Get(context.Background()))
 
 	// get a value if available
 	if value, ok := cache.Peek(); ok {
@@ -59,6 +60,7 @@ var semiTestTick = time.Millisecond
 var fullTestTick = 2 * semiTestTick
 
 func TestPointInTimeSequential(t *testing.T) {
+	t.Parallel()
 	cache, probe := newCacheForTest()
 
 	value, isPresent := cache.Peek()
@@ -66,11 +68,11 @@ func TestPointInTimeSequential(t *testing.T) {
 	assert.Nil(t, value)
 	assert.Equal(t, 0, probe.LoaderInvocations())
 
-	value = cache.Get()
+	value = cache.Get(context.Background())
 	assert.Equal(t, 1, value)
 	assert.Equal(t, 1, probe.LoaderInvocations())
 
-	value = cache.Get()
+	value = cache.Get(context.Background())
 	assert.Equal(t, 1, value)
 	assert.Equal(t, 1, probe.LoaderInvocations())
 
@@ -81,6 +83,7 @@ func TestPointInTimeSequential(t *testing.T) {
 }
 
 func TestPointInTimeConcurrent(t *testing.T) {
+	t.Parallel()
 	cache, probe := newCacheForTest()
 
 	assertValueWithConcurrency(t, 1, 100_000, cache, probe)
@@ -88,6 +91,7 @@ func TestPointInTimeConcurrent(t *testing.T) {
 }
 
 func TestTTL(t *testing.T) {
+	t.Parallel()
 	cache, probe := newCacheForTest()
 
 	assertValueWithConcurrency(t, 1, 100, cache, probe)
@@ -131,6 +135,7 @@ func TestTTL(t *testing.T) {
 }
 
 func TestRenew(t *testing.T) {
+	t.Parallel()
 	cache, probe := newCacheForTest()
 
 	assertValueWithConcurrency(t, 1, 100, cache, probe)
@@ -141,7 +146,7 @@ func TestRenew(t *testing.T) {
 
 	probe.clock.Advance(testRenewalbleAfter - semiTestTick)
 
-	assert.Equal(t, 1, cache.Get())
+	assert.Equal(t, 1, cache.Get(context.Background()))
 	assert.Equal(t, 1, probe.LoaderInvocations())
 
 	probe.clock.Advance(fullTestTick)
@@ -169,13 +174,15 @@ func TestRenew(t *testing.T) {
 	assert.Equal(t, 2, probe.LoaderInvocations())
 
 	probe.clock.Advance(fullTestTick)
-	assert.Equal(t, 2, cache.Get())
+	assert.Equal(t, 2, cache.Get(context.Background()))
 	waitActivelyUntil(t, func() bool { return probe.LoaderInvocations() != 2 }, time.Second)
 	time.Sleep(time.Millisecond)
 	assert.Equal(t, 3, probe.LoaderInvocations())
 }
 
 func TestExpiresDuringRenew(t *testing.T) {
+	t.Parallel()
+	t.Deadline()
 	cache, probe := newCacheForTest()
 
 	assertValueWithConcurrency(t, 1, 100, cache, probe)
@@ -210,6 +217,33 @@ func TestExpiresDuringRenew(t *testing.T) {
 	probe.clock.Advance(testRenewalbleAfter - semiTestTick)
 	assertValueWithConcurrency(t, 2, 100_000, cache, probe)
 	time.Sleep(time.Millisecond)
+	assert.Equal(t, 2, probe.LoaderInvocations())
+}
+
+func TestGetContext(t *testing.T) {
+	t.Parallel()
+	cache, probe := newCacheForTest()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	assert.Nil(t, cache.Get(ctx))
+	time.Sleep(100 * time.Millisecond)
+	assert.Equal(t, 0, probe.LoaderInvocations())
+
+	// Get a value so that there's an old value in the cache
+	assert.Equal(t, 1, cache.Get(context.Background()))
+	probe.clock.Advance(2 * testTTL)
+
+	// we won't let the loading complete until later
+	probe.waitGroup.Add(1)
+
+	ctx, cancel = context.WithCancel(context.Background())
+	time.AfterFunc(100*time.Millisecond, cancel)
+	assert.Equal(t, 1, cache.Get(ctx))
+	assert.Equal(t, 2, probe.LoaderInvocations())
+
+	ctx, cancel = context.WithTimeout(context.Background(), 100*time.Millisecond)
+	assert.Equal(t, 1, cache.Get(ctx))
 	assert.Equal(t, 2, probe.LoaderInvocations())
 }
 
@@ -263,7 +297,7 @@ func assertValueWithConcurrencyNoAdd(t *testing.T, value interface{}, concurrenc
 	results := make(chan interface{}, concurrency)
 	for i := 0; i <= concurrency; i++ {
 		go func() {
-			results <- cache.Get()
+			results <- cache.Get(context.Background())
 		}()
 	}
 
