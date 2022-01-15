@@ -45,7 +45,7 @@ func (e Entry) unexpiredValue(now time.Time) (value interface{}, isUnexpired boo
 //
 // A Loader returns receives the previous cache Entry, and returns a new Entry.
 //
-// If the new Entry has an Expires time in the past, loading will be immediately retried.
+// If the new Entry has an Expires time in the past, loading will be immediately retried as long as there are goroutines trying to retrive a value.
 type Loader func(previous Entry) Entry
 
 // SingleValueCache is a cache for a single value.
@@ -90,6 +90,22 @@ type inMemoryState struct {
 	currentEntry Entry
 }
 
+func (s *inMemoryState) isLoaded() bool {
+	select {
+	case <-s.loaded:
+		return true
+	default:
+		return false
+	}
+}
+
+func (s *inMemoryState) latestReadableEntry() Entry {
+	if s.isLoaded() {
+		return s.currentEntry
+	}
+	return s.previousEntry
+}
+
 var _ SingleValueCache = (*InMemory)(nil)
 
 // NewInMemory returns a new InMemory SingleValueCache using the given Loader.
@@ -121,78 +137,65 @@ func NewInMemory(loader Loader) *InMemory {
 // There will only ever be one goroutine invoking the Loader at any given time.
 // If multiple threads call Get concurrently, a single one of them will invoke the Loader, and the others will wait for it to finish.
 func (m *InMemory) Get(ctx context.Context) interface{} {
-	for {
-		state, loaded := m.getState()
-		now := m.clock.Now()
-		var wait <-chan struct{}
-		var expiredValue interface{}
-		if loaded {
-			if value, unexpired := state.currentEntry.unexpiredValue(now); unexpired {
-				if !now.Before(state.currentEntry.BecomesRenewable) && ctx.Err() == nil {
-					m.triggerLoading(state)
-				}
-				return value
-			}
-			expiredValue = state.currentEntry.Value
-			if ctx.Err() != nil {
-				return expiredValue
-			}
-			wait = m.triggerLoading(state)
-			if wait == nil {
-				continue
-			}
-		} else {
-			if value, unexpired := state.previousEntry.unexpiredValue(now); unexpired {
-				return value
-			}
-			wait = state.loaded
-			expiredValue = state.previousEntry.Value
-		}
-		select {
-		case <-ctx.Done():
-			return expiredValue
-		case <-wait:
-		}
+	state := m.getState()
+
+	if ctx.Err() != nil {
+		return state.latestReadableEntry().Value
 	}
+
+	if state.isLoaded() {
+		goto LOADED
+	} else if value, unexpired := state.previousEntry.unexpiredValue(m.clock.Now()); unexpired {
+		return value
+	}
+
+	// The rest of this function is just a for loop that we can jump into the middle of to optimise the case where we already know we're loaded
+
+WAIT_UNTIL_LOADED:
+	select {
+	case <-ctx.Done():
+		return state.previousEntry.Value
+	case <-state.loaded:
+	}
+
+LOADED:
+	now := m.clock.Now()
+	if value, unexpired := state.currentEntry.unexpiredValue(now); unexpired {
+		if !now.Before(state.currentEntry.BecomesRenewable) {
+			m.triggerLoading(state)
+		}
+		return value
+	}
+	state = m.triggerLoading(state)
+	goto WAIT_UNTIL_LOADED // loop
 }
 
 // Peek returns an unexpired value if one is already loaded.
 //
 // If there is no unexpired value immediately available, the value will be nil and hasValue will be false.
 func (m *InMemory) Peek() (value interface{}, hasValue bool) {
-	state, loaded := m.getState()
-	entry := state.previousEntry
-	if loaded {
-		entry = state.currentEntry
-	}
-	value, hasValue = entry.unexpiredValue(m.clock.Now())
+	value, hasValue = m.getState().latestReadableEntry().unexpiredValue(m.clock.Now())
 	return
 }
 
-func (m *InMemory) getState() (state *inMemoryState, loaded bool) {
-	state = (*inMemoryState)(atomic.LoadPointer(&m.state))
-	select {
-	case <-state.loaded:
-		loaded = true
-	default:
-	}
-	return
+func (m *InMemory) getState() *inMemoryState {
+	return (*inMemoryState)(atomic.LoadPointer(&m.state))
 }
 
-func (m *InMemory) triggerLoading(old *inMemoryState) <-chan struct{} {
+func (m *InMemory) triggerLoading(old *inMemoryState) *inMemoryState {
 	loaded := make(chan struct{})
 	newState := &inMemoryState{
 		previousEntry: old.currentEntry,
 		loaded:        loaded,
 	}
 	if !m.replaceState(old, newState) {
-		return nil
+		return m.getState()
 	}
 	go func() {
 		newState.currentEntry = m.loader(newState.previousEntry)
 		close(loaded)
 	}()
-	return loaded
+	return newState
 }
 
 func (m *InMemory) replaceState(old *inMemoryState, new *inMemoryState) bool {
