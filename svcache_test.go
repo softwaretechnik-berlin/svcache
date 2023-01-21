@@ -15,14 +15,14 @@ import (
 )
 
 func ExampleInMemory() {
-	cache := NewInMemory(func(previous Entry) Entry {
+	cache := NewInMemory(func(previous Entry[json.RawMessage]) Entry[json.RawMessage] {
 		value, ok := determineNewValue()
 		if !ok {
 			return previous
 		}
 
 		now := time.Now()
-		return Entry{
+		return Entry[json.RawMessage]{
 			Value:            value,
 			BecomesRenewable: now.Add(300 * time.Millisecond),
 			Expires:          now.Add(500 * time.Millisecond),
@@ -65,7 +65,7 @@ func TestPointInTimeSequential(t *testing.T) {
 
 	value, isPresent := cache.Peek()
 	assert.False(t, isPresent)
-	assert.Nil(t, value)
+	assert.Equal(t, 0, value)
 	assert.Equal(t, 0, probe.LoaderInvocations())
 
 	value, err := cache.Get(context.Background())
@@ -234,7 +234,7 @@ func TestGetContext(t *testing.T) {
 	cancel()
 	value, err := cache.Get(ctx)
 	assert.Equal(t, context.Canceled, err)
-	assert.Nil(t, value, "Nil expected because the context was cancelled and no value has yet been loaded")
+	assert.Equal(t, 0, value, "Empty value expected because the context was cancelled and no value has yet been loaded")
 	time.Sleep(100 * time.Millisecond)
 	assert.Equal(t, 0, probe.LoaderInvocations())
 
@@ -263,15 +263,15 @@ func TestGetContext(t *testing.T) {
 	probe.waitGroup.Done()
 }
 
-func newCacheForTest() (*InMemory, *testProbe) {
+func newCacheForTest() (SingleValueCache[int], *testProbe) {
 	probe := &testProbe{
 		clock: newManualClock(),
 	}
-	load := func(_ Entry) Entry {
+	load := func(_ Entry[int]) Entry[int] {
 		value := int(probe.loaderInvocations.Increment())
 		probe.waitGroup.Wait()
 		now := probe.clock.Now()
-		return Entry{
+		return Entry[int]{
 			Value:            value,
 			BecomesRenewable: now.Add(testRenewalbleAfter),
 			Expires:          now.Add(testTTL),
@@ -304,21 +304,22 @@ func (c *atomicCounter) Increment() uint32 {
 	return atomic.AddUint32(&c.uint32, 1)
 }
 
-func assertValueWithConcurrency(t *testing.T, value interface{}, concurrency int, cache SingleValueCache, probe *testProbe) {
+func assertValueWithConcurrency[V any](t *testing.T, value V, concurrency int, cache SingleValueCache[V], probe *testProbe) {
 	probe.waitGroup.Add(1)
 	assertValueWithConcurrencyNoAdd(t, value, concurrency, cache, probe)
 }
 
-func assertValueWithConcurrencyNoAdd(t *testing.T, value interface{}, concurrency int, cache SingleValueCache, probe *testProbe) {
-	type result struct {
-		value interface{}
-		err   error
-	}
-	results := make(chan result, concurrency)
+type result[V any] struct {
+	value V
+	err   error
+}
+
+func assertValueWithConcurrencyNoAdd[V any](t *testing.T, value V, concurrency int, cache SingleValueCache[V], probe *testProbe) {
+	results := make(chan result[V], concurrency)
 	for i := 0; i <= concurrency; i++ {
 		go func() {
 			value, err := cache.Get(context.Background())
-			results <- result{value, err}
+			results <- result[V]{value, err}
 		}()
 	}
 
