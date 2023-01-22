@@ -14,7 +14,7 @@ See the GoDoc for details.
 Example
 -------
 
-Here's a contrived example to show the interface (feel free to [try it in the playground](https://go.dev/play/p/-bRBiO2eVKJ)):
+Here's a brief example demonstrate how it can be used:
 
 ```go
 package main
@@ -28,44 +28,53 @@ import (
 )
 
 func main() {
-	cache := svcache.NewInMemory(func(previous svcache.Entry) svcache.Entry {
-		value, ok := determineNewValue()
-		if !ok {
-			return previous
-		}
+	// You can create a full-featured cache like this:
+	cache := svcache.NewInMemory(
 
-		now := time.Now()
-		return svcache.Entry{
-			Value:            value,
-			BecomesRenewable: now.Add(time.Second / 2),
-			Expires:          now.Add(time.Second),
-		}
-	})
+		// This context will be used for all calls to the loader, and is respected when a caller waits for a fresh cache value.
+		// E.g. you can cancel the context to signal to the load that it should stop and to prevent readers from blocking on updates that aren't coming.
+		context.Background(),
 
-	for i := 0; i < 50; i++ {
-		i := i
-		go func() {
-			// Block for a value
-			value, _ := cache.Get(context.Background())
-			fmt.Println(i, "Get ", value)
-		}()
-		time.Sleep(100 * time.Millisecond)
-	}
+		// The backoff updater
+		svcache.NewBackoffUpdater(
 
-	// peek at the current value if available
-	if value, ok := cache.Peek(); ok {
-		fmt.Println("Peek", value)
-	}
-}
+			// The backoff updater We'll automatically add timestamps to the values returned by the loader.
+			// Alternatively
+			svcache.NewTimestampedLoader(fetchNewValue),
 
-// this is a stand-in for whatever type you want to use with the cache
-type whateverTypeYouPlease struct {
-	AField time.Time
-}
+			// Define a backoff strategy.
+			// Here we use our balanced backoff strategy which exponentially scales between two values at the rate of the Fibonacci sequence with some jitter.
+			// This is a good default strategy for many cases, but you might choose to use a strategy tailored to your use case.
+			svcache.NewBalancedBackoffStrategy(100*time.Millisecond, time.Minute),
 
-// this is a stub for whatever fancy behaviour you have for getting a value
-func determineNewValue() (whateverTypeYouPlease, bool) {
-	time.Sleep(200 * time.Millisecond)
-	return whateverTypeYouPlease{time.Now()}, true
+			// The error handler is called whenever the loader returns an error, allowing you to log or otherwise handle the error.
+			func(ctx context.Context, previous svcache.Timestamped[string], consecutiveErrors uint, err error) {
+				fmt.Printf(
+					"error retrieving new value for cache (number %v in a row, current value has timestamp %v): %v",
+					consecutiveErrors, previous.Timestamp, err,
+				)
+			},
+		),
+	)
+
+	// Now you can use the cache.
+	// Each time you access it, you can use whatever retrieval strategy is appropriate for that call.
+	// You'll probably want to instantiate the strategies once and reuse them, but you can also create them on the fly.
+
+	// some retrieval strategies:
+	justReturn := svcache.JustReturn[svcache.Timestamped[string]]
+	waitForAnyValue := svcache.WaitForNonZeroTimestamp(justReturn)
+	takeAnythingAndTriggerIfTooOld := svcache.TriggerIfAged[string](5 * time.Minute)
+
+	// some accesses:
+	value, err := cache.Get(context.Background(), waitForAnyValue)
+	fmt.Println(value, err)
+	value, err = cache.Get(context.Background(), takeAnythingAndTriggerIfTooOld)
+	fmt.Println(value, err)
+	value, err = cache.Get(context.Background(), justReturn)
+	fmt.Println(value, err)
+
+	// the strategy in the last access always returns a value, and for that we can use the simpler Peek method:
+	fmt.Println(cache.Peek())
 }
 ```

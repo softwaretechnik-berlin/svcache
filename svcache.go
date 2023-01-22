@@ -31,6 +31,7 @@ type SingleValueCache[V any] interface {
 	Get(context.Context, RetrievalStrategy[V]) (V, error)
 }
 
+// RetrievalStrategy is a function that determines what should be done when encountering the given value while trying to get a value from the cache.
 type RetrievalStrategy[V any] func(currentValue V) Action
 
 // Updater is function that loads values into the cache.
@@ -43,8 +44,11 @@ type RetrievalStrategy[V any] func(currentValue V) Action
 // and may even choose to sleep e.g. to implement backoff logic to avoid overwhelming a struggling value source.
 type Updater[V any] func(ctx context.Context, previous V) V
 
+// Loader is a function that loads values into the cache.
+// It is not used directly by the cache, but can be used to create an Updater.
 type Loader[V any] func(context.Context) (V, error)
 
+// JustReturn is a RetrievalStrategy that always returns the current value without triggering an update.
 func JustReturn[V any](current V) Action {
 	return Return
 }

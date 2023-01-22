@@ -31,6 +31,10 @@ func NewInMemory[V any](loaderCtx context.Context, loader Updater[V]) *InMemory[
 	return NewInMemoryWithInitialValue(loaderCtx, *new(V), loader)
 }
 
+// NewInMemoryWithInitialValue returns a new InMemory SingleValueCache using the given initial value and Loader.
+//
+// There will only ever be one goroutine invoking the Loader at any given time.
+// If multiple threads call Get concurrently, a single one of them will invoke the Loader, and the others will wait for it to finish.
 func NewInMemoryWithInitialValue[V any](loaderCtx context.Context, initialValue V, loader Updater[V]) *InMemory[V] {
 	im := &InMemory[V]{loaderCtx: loaderCtx, loader: loader}
 	im.state.Store(newInMemoryState(initialValue))
@@ -72,6 +76,7 @@ func (m *InMemory[V]) Get(ctx context.Context, strategy RetrievalStrategy[V]) (V
 	}
 }
 
+// Peek returns the current value without triggering a load.
 func (m *InMemory[V]) Peek() V {
 	return m.state.Load().value
 }
