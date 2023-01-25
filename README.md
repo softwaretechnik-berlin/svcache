@@ -62,17 +62,17 @@ func main() {
 	// You'll probably want to instantiate the strategies once and reuse them, but you can also create them on the fly.
 
 	// some retrieval strategies:
-	justReturn := svcache.JustReturn[svcache.Timestamped[string]]
-	waitForAnyValue := svcache.WaitForNonZeroTimestamp(justReturn)
-	takeAnythingAndTriggerIfTooOld := svcache.TriggerIfAged[string](5 * time.Minute)
+	alwaysTrigger := svcache.AlwaysTrigger[svcache.Timestamped[string]]
+	waitForAnyValue := svcache.WaitForNonZeroTimestamp(alwaysTrigger)
+	triggerIfTooOld := svcache.TriggerIfAged[string](5 * time.Minute)
 
 	// some accesses:
 	value, err := cache.Get(context.Background(), waitForAnyValue)
 	fmt.Println(value, err)
-	value, err = cache.Get(context.Background(), takeAnythingAndTriggerIfTooOld)
-	fmt.Println(value, err)
-	value, err = cache.Get(context.Background(), justReturn)
-	fmt.Println(value, err)
+	value = cache.GetImmediately(triggerIfTooOld)
+	fmt.Println(value)
+	value = cache.GetImmediately(alwaysTrigger)
+	fmt.Println(value)
 
 	// the strategy in the last access always returns a value, and for that we can use the simpler Peek method:
 	fmt.Println(cache.Peek())
