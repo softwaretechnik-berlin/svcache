@@ -70,7 +70,7 @@ const semiTestTick = time.Millisecond
 // giving the implementation flexibility about how to handle that edge case.
 const fullTestTick = 2 * semiTestTick
 
-func testRetrievalStrategy(probe *testProbe) RetrievalStrategy[Timestamped[int]] {
+func refreshStrategyForTest(probe *testProbe) RefreshStrategy[Timestamped[int]] {
 	return triggerOrWaitIfAged[int](probe.clock, testRenewalbleAfter, testTTL)
 }
 
@@ -78,19 +78,19 @@ func TestPointInTimeSequential(t *testing.T) {
 	t.Parallel()
 	cache, probe := newCacheForTest()
 
-	retrievalStrategy := testRetrievalStrategy(probe)
+	refreshStrategy := refreshStrategyForTest(probe)
 
 	value := cache.Peek()
 	assert.True(t, value.Timestamp.IsZero())
 	assert.Equal(t, 0, value.Value)
 	assert.Equal(t, 0, probe.LoaderInvocations())
 
-	value, err := cache.Get(context.Background(), retrievalStrategy)
+	value, err := cache.Get(context.Background(), refreshStrategy)
 	assert.NoError(t, err)
 	assert.Equal(t, 1, value.Value)
-	assert.Equal(t, 1, probe.LoaderInvocations(), retrievalStrategy)
+	assert.Equal(t, 1, probe.LoaderInvocations(), refreshStrategy)
 
-	value, err = cache.Get(context.Background(), retrievalStrategy)
+	value, err = cache.Get(context.Background(), refreshStrategy)
 	assert.NoError(t, err)
 	assert.Equal(t, 1, value.Value)
 	assert.Equal(t, 1, probe.LoaderInvocations())
@@ -105,9 +105,9 @@ func TestPointInTimeConcurrent(t *testing.T) {
 	t.Parallel()
 	cache, probe := newCacheForTest()
 
-	retrievalStrategy := testRetrievalStrategy(probe)
+	refreshStrategy := refreshStrategyForTest(probe)
 
-	assertValueWithConcurrency[Timestamped[int]](t, Timestamped[int]{1, probe.clock.Now()}, 100_000, cache, probe, retrievalStrategy)
+	assertValueWithConcurrency[Timestamped[int]](t, Timestamped[int]{1, probe.clock.Now()}, 100_000, cache, probe, refreshStrategy)
 	assert.Equal(t, 1, probe.LoaderInvocations())
 }
 
@@ -115,10 +115,10 @@ func TestTTL(t *testing.T) {
 	t.Parallel()
 	cache, probe := newCacheForTest()
 
-	retrievalStrategy := testRetrievalStrategy(probe)
+	refreshStrategy := refreshStrategyForTest(probe)
 
 	expectedValueAfterLoad1 := Timestamped[int]{1, probe.clock.Now()}
-	assertValueWithConcurrency[Timestamped[int]](t, expectedValueAfterLoad1, 100, cache, probe, retrievalStrategy)
+	assertValueWithConcurrency[Timestamped[int]](t, expectedValueAfterLoad1, 100, cache, probe, refreshStrategy)
 	assert.Equal(t, 1, probe.LoaderInvocations())
 
 	// we won't let the loading complete until later
@@ -126,18 +126,18 @@ func TestTTL(t *testing.T) {
 
 	probe.clock.Advance(testRenewalbleAfter - semiTestTick)
 
-	assertValueWithConcurrency[Timestamped[int]](t, expectedValueAfterLoad1, 100, cache, probe, retrievalStrategy)
+	assertValueWithConcurrency[Timestamped[int]](t, expectedValueAfterLoad1, 100, cache, probe, refreshStrategy)
 	assert.Equal(t, 1, probe.LoaderInvocations())
 
 	probe.clock.Advance(testTTL - testRenewalbleAfter)
 
-	assertValueWithConcurrency[Timestamped[int]](t, expectedValueAfterLoad1, 100, cache, probe, retrievalStrategy)
+	assertValueWithConcurrency[Timestamped[int]](t, expectedValueAfterLoad1, 100, cache, probe, refreshStrategy)
 
 	probe.clock.Advance(fullTestTick)
 
 	// allow loading to complete after starting to retrieve value
 	expectedValueAfterLoad2 := Timestamped[int]{2, probe.clock.Now()}
-	assertValueWithConcurrencyNoAdd[Timestamped[int]](t, expectedValueAfterLoad2, 100, cache, probe, retrievalStrategy)
+	assertValueWithConcurrencyNoAdd[Timestamped[int]](t, expectedValueAfterLoad2, 100, cache, probe, refreshStrategy)
 	assert.Equal(t, 2, probe.LoaderInvocations())
 
 	// we won't let the loading complete until later
@@ -145,17 +145,17 @@ func TestTTL(t *testing.T) {
 
 	probe.clock.Advance(testRenewalbleAfter - semiTestTick)
 
-	assertValueWithConcurrency[Timestamped[int]](t, expectedValueAfterLoad2, 100, cache, probe, retrievalStrategy)
+	assertValueWithConcurrency[Timestamped[int]](t, expectedValueAfterLoad2, 100, cache, probe, refreshStrategy)
 	assert.Equal(t, 2, probe.LoaderInvocations())
 
 	probe.clock.Advance(testTTL - testRenewalbleAfter)
 
-	assertValueWithConcurrency[Timestamped[int]](t, expectedValueAfterLoad2, 100, cache, probe, retrievalStrategy)
+	assertValueWithConcurrency[Timestamped[int]](t, expectedValueAfterLoad2, 100, cache, probe, refreshStrategy)
 
 	probe.clock.Advance(fullTestTick)
 
 	// allow loading to complete after starting to retrieve value
-	assertValueWithConcurrencyNoAdd[Timestamped[int]](t, Timestamped[int]{3, probe.clock.Now()}, 100, cache, probe, retrievalStrategy)
+	assertValueWithConcurrencyNoAdd[Timestamped[int]](t, Timestamped[int]{3, probe.clock.Now()}, 100, cache, probe, refreshStrategy)
 	assert.Equal(t, 3, probe.LoaderInvocations())
 }
 
@@ -163,10 +163,10 @@ func TestRenew(t *testing.T) {
 	t.Parallel()
 	cache, probe := newCacheForTest()
 
-	retrievalStrategy := testRetrievalStrategy(probe)
+	refreshStrategy := refreshStrategyForTest(probe)
 
 	expectedValueAfterLoad1 := Timestamped[int]{1, probe.clock.Now()}
-	assertValueWithConcurrency[Timestamped[int]](t, expectedValueAfterLoad1, 100, cache, probe, retrievalStrategy)
+	assertValueWithConcurrency[Timestamped[int]](t, expectedValueAfterLoad1, 100, cache, probe, refreshStrategy)
 	assert.Equal(t, 1, probe.LoaderInvocations())
 
 	// we won't let the loading complete until later
@@ -174,14 +174,14 @@ func TestRenew(t *testing.T) {
 
 	probe.clock.Advance(testRenewalbleAfter - semiTestTick)
 
-	value, err := cache.Get(context.Background(), retrievalStrategy)
+	value, err := cache.Get(context.Background(), refreshStrategy)
 	assert.NoError(t, err)
 	assert.Equal(t, expectedValueAfterLoad1, value)
 	assert.Equal(t, 1, probe.LoaderInvocations())
 
 	probe.clock.Advance(fullTestTick)
 
-	assertValueWithConcurrency[Timestamped[int]](t, expectedValueAfterLoad1, 100_000, cache, probe, retrievalStrategy)
+	assertValueWithConcurrency[Timestamped[int]](t, expectedValueAfterLoad1, 100_000, cache, probe, refreshStrategy)
 	waitActivelyUntil(t, func() bool { return probe.LoaderInvocations() != 1 }, time.Second)
 	assert.Equal(t, 2, probe.LoaderInvocations())
 
@@ -197,12 +197,12 @@ func TestRenew(t *testing.T) {
 	assert.Equal(t, 2, probe.LoaderInvocations())
 
 	probe.clock.Advance(testRenewalbleAfter - semiTestTick)
-	assertValueWithConcurrency[Timestamped[int]](t, expectedValueAfterLoad2, 100, cache, probe, retrievalStrategy)
+	assertValueWithConcurrency[Timestamped[int]](t, expectedValueAfterLoad2, 100, cache, probe, refreshStrategy)
 	time.Sleep(time.Millisecond)
 	assert.Equal(t, 2, probe.LoaderInvocations())
 
 	probe.clock.Advance(fullTestTick)
-	value, err = cache.Get(context.Background(), retrievalStrategy)
+	value, err = cache.Get(context.Background(), refreshStrategy)
 	assert.NoError(t, err)
 	assert.Equal(t, expectedValueAfterLoad2, value)
 	waitActivelyUntil(t, func() bool { return probe.LoaderInvocations() != 2 }, time.Second)
@@ -214,10 +214,10 @@ func TestExpiresDuringRenew(t *testing.T) {
 	t.Parallel()
 	cache, probe := newCacheForTest()
 
-	retrievalStrategy := testRetrievalStrategy(probe)
+	refreshStrategy := refreshStrategyForTest(probe)
 
 	expectedValueAfterLoad1 := Timestamped[int]{1, probe.clock.Now()}
-	assertValueWithConcurrency[Timestamped[int]](t, expectedValueAfterLoad1, 100, cache, probe, retrievalStrategy)
+	assertValueWithConcurrency[Timestamped[int]](t, expectedValueAfterLoad1, 100, cache, probe, refreshStrategy)
 	assert.Equal(t, 1, probe.LoaderInvocations())
 
 	// we won't let the loading complete until later
@@ -225,12 +225,12 @@ func TestExpiresDuringRenew(t *testing.T) {
 
 	probe.clock.Advance(testRenewalbleAfter + semiTestTick)
 
-	assertValueWithConcurrency[Timestamped[int]](t, expectedValueAfterLoad1, 100, cache, probe, retrievalStrategy)
+	assertValueWithConcurrency[Timestamped[int]](t, expectedValueAfterLoad1, 100, cache, probe, refreshStrategy)
 	waitActivelyUntil(t, func() bool { return probe.LoaderInvocations() != 1 }, time.Second)
 	assert.Equal(t, 2, probe.LoaderInvocations())
 
 	probe.clock.Advance(-fullTestTick + testTTL - testRenewalbleAfter)
-	assertValueWithConcurrency[Timestamped[int]](t, expectedValueAfterLoad1, 100_000, cache, probe, retrievalStrategy)
+	assertValueWithConcurrency[Timestamped[int]](t, expectedValueAfterLoad1, 100_000, cache, probe, refreshStrategy)
 	time.Sleep(time.Millisecond)
 	assert.Equal(t, 2, probe.LoaderInvocations())
 
@@ -238,7 +238,7 @@ func TestExpiresDuringRenew(t *testing.T) {
 
 	// Allow the loading to complete after starting to retrieve value
 	expectedValueAfterLoad2 := Timestamped[int]{2, probe.clock.Now()}
-	assertValueWithConcurrencyNoAdd[Timestamped[int]](t, expectedValueAfterLoad2, 100_000, cache, probe, retrievalStrategy)
+	assertValueWithConcurrencyNoAdd[Timestamped[int]](t, expectedValueAfterLoad2, 100_000, cache, probe, refreshStrategy)
 	time.Sleep(time.Millisecond)
 	assert.Equal(t, 2, probe.LoaderInvocations())
 
@@ -247,7 +247,7 @@ func TestExpiresDuringRenew(t *testing.T) {
 	assert.Equal(t, 2, probe.LoaderInvocations())
 
 	probe.clock.Advance(testRenewalbleAfter - semiTestTick)
-	assertValueWithConcurrency[Timestamped[int]](t, expectedValueAfterLoad2, 100_000, cache, probe, retrievalStrategy)
+	assertValueWithConcurrency[Timestamped[int]](t, expectedValueAfterLoad2, 100_000, cache, probe, refreshStrategy)
 	time.Sleep(time.Millisecond)
 	assert.Equal(t, 2, probe.LoaderInvocations())
 }
@@ -256,11 +256,11 @@ func TestGetContext(t *testing.T) {
 	t.Parallel()
 	cache, probe := newCacheForTest()
 
-	retrievalStrategy := testRetrievalStrategy(probe)
+	refreshStrategy := refreshStrategyForTest(probe)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	value, err := cache.Get(ctx, retrievalStrategy)
+	value, err := cache.Get(ctx, refreshStrategy)
 	assert.ErrorIs(t, err, context.Canceled)
 	assert.Equal(t, Timestamped[int]{}, value, "Empty value expected because the context was cancelled and no value has yet been loaded")
 	time.Sleep(100 * time.Millisecond)
@@ -275,13 +275,13 @@ func TestGetContext(t *testing.T) {
 
 	ctx, cancel = context.WithCancel(context.Background())
 	time.AfterFunc(100*time.Millisecond, cancel)
-	value, err = cache.Get(ctx, retrievalStrategy)
+	value, err = cache.Get(ctx, refreshStrategy)
 	assert.ErrorIs(t, err, context.Canceled)
 	assert.Equal(t, expectedValueAfterLoad1, value)
 	assert.Equal(t, 2, probe.LoaderInvocations())
 
 	ctx, cancel = context.WithTimeout(context.Background(), 100*time.Millisecond)
-	value, err = cache.Get(ctx, retrievalStrategy)
+	value, err = cache.Get(ctx, refreshStrategy)
 	cancel()
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 	assert.Equal(t, expectedValueAfterLoad1, value)
@@ -322,11 +322,11 @@ func assertValueWithConcurrency[V any](
 	concurrency int,
 	cache SingleValueCache[V],
 	probe *testProbe,
-	retrievalStrategy RetrievalStrategy[V],
+	refreshStrategy RefreshStrategy[V],
 ) {
 	t.Helper()
 	probe.waitGroup.Add(1)
-	assertValueWithConcurrencyNoAdd(t, value, concurrency, cache, probe, retrievalStrategy)
+	assertValueWithConcurrencyNoAdd(t, value, concurrency, cache, probe, refreshStrategy)
 }
 
 type result[V any] struct {
@@ -341,12 +341,12 @@ func assertValueWithConcurrencyNoAdd[V any](
 	concurrency int,
 	cache SingleValueCache[V],
 	probe *testProbe,
-	retrievalStrategy RetrievalStrategy[V],
+	refreshStrategy RefreshStrategy[V],
 ) {
 	results := make(chan result[V], concurrency)
 	for i := 0; i <= concurrency; i++ {
 		go func() {
-			value, err := cache.Get(context.Background(), retrievalStrategy)
+			value, err := cache.Get(context.Background(), refreshStrategy)
 			results <- result[V]{value, err}
 		}()
 	}
