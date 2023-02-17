@@ -1,6 +1,8 @@
 SVCache
 =======
 
+[![Go Reference](https://pkg.go.dev/badge/github.com/softwaretechnik-berlin/svcache.svg)](https://pkg.go.dev/github.com/softwaretechnik-berlin/svcache)
+
 SVCache is a threadsafe, single-value cache with a simple but flexible API.
 
 When there is no fresh value in the cache, an attempt to retrieve the value will block until a new value is loaded.
