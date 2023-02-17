@@ -63,3 +63,20 @@ func AccessStrategyFromRefreshStrategyAndWaitPredicate[V any](trigger RefreshStr
 		}
 	}
 }
+
+// but will not wait for a new value to be loaded if the given number of consecutive errors has been reached.
+//
+// This can be used with the ConsecutiveErrorsCounter returned by [NewBackoffUpdaterAndConsecutiveErrorsCounter].
+func DoNotWaitAfterTooManyErrors[V any](
+	attemptsBeforeGivingUp uint,
+	consecutiveErrors ConsecutiveErrorsCounter,
+	underlying AccessStrategy[V],
+) AccessStrategy[V] {
+	return func(current V) Action {
+		underlyingAction := underlying(current)
+		if underlyingAction == WaitForNewlyLoadedValue && consecutiveErrors.Value() >= attemptsBeforeGivingUp {
+			return TriggerLoadAndUseCachedValue
+		}
+		return underlyingAction
+	}
+}

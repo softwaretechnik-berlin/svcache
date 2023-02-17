@@ -8,6 +8,14 @@ import (
 	"time"
 )
 
+type ConsecutiveErrorsCounter struct {
+	counter *atomic.Uint32
+}
+
+func (c ConsecutiveErrorsCounter) Value() uint {
+	return uint(c.counter.Load())
+}
+
 // NewBackoffUpdater returns an updater that uses a backoff strategy to determine how long to wait after an error before retrying.
 func NewBackoffUpdater[V any](
 	loader Loader[Timestamped[V]],
@@ -24,7 +32,7 @@ func NewBackoffUpdaterAndConsecutiveErrorsCounter[V any](
 	loader Loader[Timestamped[V]],
 	backoffStrategy BackoffStrategy,
 	errorHandler ErrorHandler[Timestamped[V]],
-) (updater Updater[Timestamped[V]], consecutiveErrors *atomic.Uint32) {
+) (Updater[Timestamped[V]], ConsecutiveErrorsCounter) {
 	return newBackoffUpdater(systemClock{}, loader, backoffStrategy, errorHandler)
 }
 
@@ -33,10 +41,10 @@ func newBackoffUpdater[V any](
 	loader Loader[Timestamped[V]],
 	backoffStrategy BackoffStrategy,
 	errorHandler ErrorHandler[Timestamped[V]],
-) (updater Updater[Timestamped[V]], consecutiveErrors *atomic.Uint32) {
-	consecutiveErrors = new(atomic.Uint32)
+) (Updater[Timestamped[V]], ConsecutiveErrorsCounter) {
+	consecutiveErrors := new(atomic.Uint32)
 	var lastAttempt time.Time
-	updater = func(ctx context.Context, previous Timestamped[V]) Timestamped[V] {
+	updater := func(ctx context.Context, previous Timestamped[V]) Timestamped[V] {
 		currentConsecutiveErrors := consecutiveErrors.Load()
 		if currentConsecutiveErrors > 0 {
 			clock.Sleep(backoffStrategy(uint(currentConsecutiveErrors)) - clock.Since(lastAttempt))
@@ -45,13 +53,14 @@ func newBackoffUpdater[V any](
 		value, err := loader(ctx)
 		if err != nil {
 			currentConsecutiveErrors++
+			consecutiveErrors.Store(currentConsecutiveErrors)
 			errorHandler(ctx, previous, uint(currentConsecutiveErrors), err)
 			return previous
 		}
 		consecutiveErrors.Store(0)
 		return value
 	}
-	return
+	return updater, ConsecutiveErrorsCounter{consecutiveErrors}
 }
 
 // BakcoffStrategy is a function that takes the number of consecutive errors that have occurred so far,

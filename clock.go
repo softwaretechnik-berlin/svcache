@@ -56,12 +56,15 @@ func (c *manualClock) Since(t time.Time) time.Duration {
 	return c.Now().Sub(t)
 }
 
-func (c *manualClock) Sleep(d time.Duration) {
+func (c *manualClock) Sleep(duration time.Duration) {
+	if duration <= 0 {
+		return
+	}
 	done := make(chan struct{})
 	func() {
 		c.mutex.Lock()
 		defer c.mutex.Unlock()
-		c.sleepers = append(c.sleepers, Timestamped[chan<- struct{}]{done, c.now.Add(d)})
+		c.sleepers = append(c.sleepers, Timestamped[chan<- struct{}]{done, c.now.Add(duration)})
 	}()
 	<-done
 }
