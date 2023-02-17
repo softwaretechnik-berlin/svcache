@@ -50,3 +50,16 @@ func nonBlockingAction[V any](strategy RefreshStrategy[V], value V) Action {
 	}
 	return UseCachedValue
 }
+
+func AccessStrategyFromRefreshStrategyAndWaitPredicate[V any](trigger RefreshStrategy[V], shouldWait func(currentValue V) bool) AccessStrategy[V] {
+	return func(current V) Action {
+		switch {
+		case shouldWait(current):
+			return WaitForNewlyLoadedValue
+		case trigger(current):
+			return TriggerLoadAndUseCachedValue
+		default:
+			return UseCachedValue
+		}
+	}
+}
