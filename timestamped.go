@@ -59,7 +59,7 @@ func TriggerUnlessNewerThan[V any](threshold time.Time) RefreshStrategy[Timestam
 
 // TriggerOrWaitIfAged returns a AccessStrategy for Timestamped values that waits if the value's age is at least the waitThreashold,
 // and triggers a refresh if the value's age is at least the triggerThreshold.
-func TriggerOrWaitIfAgedWaitIfAged[V any](triggerThreshold, waitThreshold time.Duration) AccessStrategy[Timestamped[V]] {
+func TriggerOrWaitIfAged[V any](triggerThreshold, waitThreshold time.Duration) AccessStrategy[Timestamped[V]] {
 	return triggerOrWaitIfAged[V](systemClock{}, triggerThreshold, waitThreshold)
 }
 
