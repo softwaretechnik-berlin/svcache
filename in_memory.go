@@ -21,7 +21,7 @@ type InMemory[V any] struct {
 	loader Updater[V]
 }
 
-var _ SingleValueCache[any] = (*InMemory[any])(nil)
+var _ Cache[any] = (*InMemory[any])(nil)
 
 // NewInMemory returns a new InMemory SingleValueCache using the given Loader.
 //

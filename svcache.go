@@ -13,8 +13,8 @@ const (
 	WaitForNewlyLoadedValue
 )
 
-// SingleValueCache is a cache for a single value of type V.
-type SingleValueCache[V any] interface {
+// Cache is a cache for a single value of type V.
+type Cache[V any] interface {
 	// Get returns a value from the cache.
 	//
 	// The value currently in the cache is passed to the given refresh strategy to determine what should be done.

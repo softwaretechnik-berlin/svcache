@@ -320,7 +320,7 @@ func assertValueWithConcurrency[V any](
 	t *testing.T,
 	value V,
 	concurrency int,
-	cache SingleValueCache[V],
+	cache Cache[V],
 	probe *testProbe,
 	refreshStrategy AccessStrategy[V],
 ) {
@@ -339,7 +339,7 @@ func assertValueWithConcurrencyNoAdd[V any](
 	t *testing.T,
 	value V,
 	concurrency int,
-	cache SingleValueCache[V],
+	cache Cache[V],
 	probe *testProbe,
 	refreshStrategy AccessStrategy[V],
 ) {
