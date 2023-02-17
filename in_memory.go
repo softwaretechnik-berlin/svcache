@@ -54,15 +54,15 @@ func NewInMemoryWithInitialValue[V any](loaderCtx context.Context, initialValue 
 // If the refresh strategy returns `WaitForLoad`, the cache will block waiting for a new value to be loaded;
 // the process then begins again with the new value being passed to the refresh strategy to determine what should be done with it.
 // During the waiting, if the context is cancelled, the context error will be returned and the last considered value will be returned.
-func (m *InMemory[V]) Get(ctx context.Context, refreshStrategy RefreshStrategy[V]) (V, error) {
+func (m *InMemory[V]) Get(ctx context.Context, refreshStrategy AccessStrategy[V]) (V, error) {
 	for {
 		state := m.state.Load()
 		value := state.value
 		action := refreshStrategy(value)
-		if action > Return {
+		if action > UseCachedValue {
 			m.triggerNext(state)
 		}
-		if action < WaitForLoad {
+		if action < WaitForNewlyLoadedValue {
 			return value, nil
 		}
 		select {
@@ -79,7 +79,7 @@ func (m *InMemory[V]) Get(ctx context.Context, refreshStrategy RefreshStrategy[V
 //
 // The value currently in the cache is passed to the given function to determine whether an update should be triggered before returning.
 // If the refresh strategy returns `true`, a refresh is trigger, otherwise it is not.
-func (m *InMemory[V]) GetImmediately(refreshStrategy NonBlockingRefreshStrategy[V]) V {
+func (m *InMemory[V]) GetImmediately(refreshStrategy RefreshStrategy[V]) V {
 	state := m.state.Load()
 	value := state.value
 	if refreshStrategy(value) {

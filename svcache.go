@@ -8,9 +8,9 @@ import (
 type Action uint8
 
 const (
-	Return Action = iota
-	TriggerLoadAndReturn
-	WaitForLoad
+	UseCachedValue Action = iota
+	TriggerLoadAndUseCachedValue
+	WaitForNewlyLoadedValue
 )
 
 // SingleValueCache is a cache for a single value of type V.
@@ -28,7 +28,7 @@ type SingleValueCache[V any] interface {
 	// If the refresh strategy returns `WaitForLoad`, the cache will block waiting for a new value to be loaded;
 	// the process then begins again with the new value being passed to the refresh strategy to determine what should be done with it.
 	// During the waiting, if the context is cancelled, the context error will be returned and the last considered value will be returned.
-	Get(context.Context, RefreshStrategy[V]) (V, error)
+	Get(context.Context, AccessStrategy[V]) (V, error)
 }
 
 // Updater is function that loads values into the cache.

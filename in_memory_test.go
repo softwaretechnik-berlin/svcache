@@ -50,9 +50,9 @@ func ExampleInMemory() {
 	// block for a non-empty value
 	blockIfEmpty := func(current string) Action {
 		if current == "" {
-			return WaitForLoad
+			return WaitForNewlyLoadedValue
 		}
-		return Return
+		return UseCachedValue
 	}
 	if value, err := cache.Get(context.Background(), blockIfEmpty); err == nil {
 		println(value)
@@ -70,7 +70,7 @@ const semiTestTick = time.Millisecond
 // giving the implementation flexibility about how to handle that edge case.
 const fullTestTick = 2 * semiTestTick
 
-func refreshStrategyForTest(probe *testProbe) RefreshStrategy[Timestamped[int]] {
+func refreshStrategyForTest(probe *testProbe) AccessStrategy[Timestamped[int]] {
 	return triggerOrWaitIfAged[int](probe.clock, testRenewalbleAfter, testTTL)
 }
 
@@ -322,7 +322,7 @@ func assertValueWithConcurrency[V any](
 	concurrency int,
 	cache SingleValueCache[V],
 	probe *testProbe,
-	refreshStrategy RefreshStrategy[V],
+	refreshStrategy AccessStrategy[V],
 ) {
 	t.Helper()
 	probe.waitGroup.Add(1)
@@ -341,7 +341,7 @@ func assertValueWithConcurrencyNoAdd[V any](
 	concurrency int,
 	cache SingleValueCache[V],
 	probe *testProbe,
-	refreshStrategy RefreshStrategy[V],
+	refreshStrategy AccessStrategy[V],
 ) {
 	results := make(chan result[V], concurrency)
 	for i := 0; i <= concurrency; i++ {

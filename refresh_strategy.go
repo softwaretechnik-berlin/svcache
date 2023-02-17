@@ -1,43 +1,52 @@
 package svcache
 
-// RefreshStrategy is a function that determines what should be done re refreshing when encountering the given value
-// while trying to get a value from the cache.
-type RefreshStrategy[V any] func(currentValue V) Action
+// AccessStrategy is a function that determines what should be done when accessing the value in the cache
+// using the potentially blocking `Get` function.
+//
+// It can either return `UseCachedValue` to return the current value immediately,
+// or `TriggerLoadAndUseCachedValue` to trigger an asynchronous load of a new value but immediately return the current value,
+// or `WaitForNewlyLoadedValue` to block until a new value is loaded and then return that.
+//
+// It is given the currently cached value, in case this decision needs to be value-dependent.
+type AccessStrategy[V any] func(currentValue V) Action
 
-var _ RefreshStrategy[any] = JustReturn[any]
+var _ AccessStrategy[any] = JustReturn[any]
 
-// JustReturn is a RefreshStrategy that always returns the current value without triggering an update.
+// JustReturn is a AccessStrategy that always returns the current value without triggering an update.
 func JustReturn[V any](current V) Action {
-	return Return
+	return UseCachedValue
 }
 
-// NonBlockingRefreshStrategy is a function that determines whether to trigger a refreshing when encountering the given value
-// while trying to get a value in a non-blocking call.
-type NonBlockingRefreshStrategy[V any] func(currentValue V) bool
+// RefreshStrategy is a function that determines whether to trigger a refresh of the cached value.
+//
+// It can either return `true` to trigger a refresh, or `false` to not trigger a refresh.
+//
+// It is given the currently cached value, in case this decision needs to be value-dependent.
+type RefreshStrategy[V any] func(currentValue V) bool
 
-var _ NonBlockingRefreshStrategy[any] = NeverTrigger[any]
-var _ NonBlockingRefreshStrategy[any] = AlwaysTrigger[any]
+var _ RefreshStrategy[any] = NeverTrigger[any]
+var _ RefreshStrategy[any] = AlwaysTrigger[any]
 
-// NeverTrigger is a NonBlockingRefreshStrategy that never triggers an update.
+// NeverTrigger is a RefreshStrategy that never triggers an update.
 func NeverTrigger[V any](current V) bool {
 	return false
 }
 
-// AlwaysTrigger is a NonBlockingRefreshStrategy that always triggers an update.
+// AlwaysTrigger is a RefreshStrategy that always triggers an update.
 func AlwaysTrigger[V any](current V) bool {
 	return true
 }
 
-// AsRefreshStrategy promotes a non-blocking refresh strategy to a refresh strategy.
-func AsRefreshStrategy[V any](nonBlockingStrategy NonBlockingRefreshStrategy[Timestamped[V]]) RefreshStrategy[Timestamped[V]] {
+// AsNonBlockingAccessStrategy promotes a non-blocking refresh strategy to a refresh strategy.
+func AsNonBlockingAccessStrategy[V any](refreshStrategy RefreshStrategy[Timestamped[V]]) AccessStrategy[Timestamped[V]] {
 	return func(current Timestamped[V]) Action {
-		return nonBlockingAction(nonBlockingStrategy, current)
+		return nonBlockingAction(refreshStrategy, current)
 	}
 }
 
-func nonBlockingAction[V any](strategy NonBlockingRefreshStrategy[V], value V) Action {
+func nonBlockingAction[V any](strategy RefreshStrategy[V], value V) Action {
 	if strategy(value) {
-		return TriggerLoadAndReturn
+		return TriggerLoadAndUseCachedValue
 	}
-	return Return
+	return UseCachedValue
 }
