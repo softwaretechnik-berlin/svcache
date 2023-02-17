@@ -4,6 +4,7 @@ import (
 	"context"
 	"math"
 	"math/rand"
+	"sync/atomic"
 	"time"
 )
 
@@ -13,6 +14,17 @@ func NewBackoffUpdater[V any](
 	backoffStrategy BackoffStrategy,
 	errorHandler ErrorHandler[Timestamped[V]],
 ) Updater[Timestamped[V]] {
+	updater, _ := newBackoffUpdater(systemClock{}, loader, backoffStrategy, errorHandler)
+	return updater
+}
+
+// NewBackoffUpdater returns an updater that uses a backoff strategy to determine how long to wait after an error before retrying,
+// and also returns a counter of the number of consecutive errors that have occurred.
+func NewBackoffUpdaterAndConsecutiveErrorsCounter[V any](
+	loader Loader[Timestamped[V]],
+	backoffStrategy BackoffStrategy,
+	errorHandler ErrorHandler[Timestamped[V]],
+) (updater Updater[Timestamped[V]], consecutiveErrors *atomic.Uint32) {
 	return newBackoffUpdater(systemClock{}, loader, backoffStrategy, errorHandler)
 }
 
@@ -21,23 +33,25 @@ func newBackoffUpdater[V any](
 	loader Loader[Timestamped[V]],
 	backoffStrategy BackoffStrategy,
 	errorHandler ErrorHandler[Timestamped[V]],
-) Updater[Timestamped[V]] {
-	consecutiveErrors := uint(0)
+) (updater Updater[Timestamped[V]], consecutiveErrors *atomic.Uint32) {
+	consecutiveErrors = new(atomic.Uint32)
 	var lastAttempt time.Time
-	return func(ctx context.Context, previous Timestamped[V]) Timestamped[V] {
-		if consecutiveErrors > 0 {
-			clock.Sleep(backoffStrategy(consecutiveErrors) - clock.Since(lastAttempt))
+	updater = func(ctx context.Context, previous Timestamped[V]) Timestamped[V] {
+		currentConsecutiveErrors := consecutiveErrors.Load()
+		if currentConsecutiveErrors > 0 {
+			clock.Sleep(backoffStrategy(uint(currentConsecutiveErrors)) - clock.Since(lastAttempt))
 		}
 		lastAttempt = clock.Now()
 		value, err := loader(ctx)
 		if err != nil {
-			consecutiveErrors++
-			errorHandler(ctx, previous, consecutiveErrors, err)
+			currentConsecutiveErrors++
+			errorHandler(ctx, previous, uint(currentConsecutiveErrors), err)
 			return previous
 		}
-		consecutiveErrors = 0
+		consecutiveErrors.Store(0)
 		return value
 	}
+	return
 }
 
 // BakcoffStrategy is a function that takes the number of consecutive errors that have occurred so far,

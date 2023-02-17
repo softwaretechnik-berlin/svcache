@@ -31,12 +31,14 @@ func NewInMemory[V any](loaderCtx context.Context, loader Updater[V]) *InMemory[
 	return NewInMemoryWithInitialValue(loaderCtx, *new(V), loader)
 }
 
-// NewInMemoryWithInitialValue returns a new InMemory SingleValueCache using the given initial value and Loader.
+// NewInMemoryWithInitialValue returns a new InMemory SingleValueCache using the given initial value and Updater.
 //
-// There will only ever be one goroutine invoking the Loader at any given time.
-// If multiple threads call Get concurrently, a single one of them will invoke the Loader, and the others will wait for it to finish.
-func NewInMemoryWithInitialValue[V any](loaderCtx context.Context, initialValue V, loader Updater[V]) *InMemory[V] {
-	im := &InMemory[V]{loaderCtx: loaderCtx, loader: loader}
+// There will only ever be one goroutine invoking the Updater at any given time.
+// If multiple threads call Get concurrently, a single one of them will invoke the Updater, and the others will wait for it to finish.
+//
+// The given context is used to perform the update.
+func NewInMemoryWithInitialValue[V any](updateCtx context.Context, initialValue V, updater Updater[V]) *InMemory[V] {
+	im := &InMemory[V]{loaderCtx: updateCtx, loader: updater}
 	im.state.Store(newInMemoryState(initialValue))
 	return im
 }
