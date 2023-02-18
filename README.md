@@ -1,7 +1,7 @@
 SVCache
 =======
 
-[![Go Reference](https://pkg.go.dev/badge/github.com/softwaretechnik-berlin/svcache.svg)](https://pkg.go.dev/github.com/softwaretechnik-berlin/svcache)
+[![Go Reference](https://pkg.go.dev/badge/github.com/softwaretechnik-berlin/svcache.svg)](https://pkg.go.dev/github.com/softwaretechnik-berlin/svcache) [![Build](https://github.com/softwaretechnik-berlin/svcache/actions/workflows/build.yml/badge.svg)](https://github.com/softwaretechnik-berlin/svcache/actions/workflows/build.yml)
 
 SVCache is a threadsafe, single-value cache with a simple but flexible API.
 
